@@ -3,6 +3,7 @@
 package binary
 
 import (
+	"bufio"
 	"bytes"
 	"debug/elf"
 	"debug/macho"
@@ -28,20 +29,30 @@ type exe interface {
 
 // openExe opens file and returns it as an exe.
 func openExe(r io.Reader) (exe, error) {
-	b, err := ioutil.ReadAll(r)
+	buffer := bufio.NewReader(r)
+	data, err := buffer.Peek(16)
 	if err != nil {
 		return nil, err
 	}
 
-	br := bytes.NewReader(b)
-
-	data := make([]byte, 16)
-	if _, err := io.ReadFull(br, data); err != nil {
-		return nil, err
+	var br io.ReaderAt
+	getReader := func() (io.ReaderAt, error) {
+		if br != nil {
+			return br, nil
+		}
+		b, err := ioutil.ReadAll(buffer)
+		if err != nil {
+			return nil, err
+		}
+		br = bytes.NewReader(b)
+		return br, nil
 	}
-	br.Seek(0, 0)
 
 	if bytes.HasPrefix(data, []byte("\x7FELF")) {
+		br, err := getReader()
+		if err != nil {
+			return nil, err
+		}
 		e, err := elf.NewFile(br)
 		if err != nil {
 			return nil, err
@@ -49,6 +60,10 @@ func openExe(r io.Reader) (exe, error) {
 		return &elfExe{e}, nil
 	}
 	if bytes.HasPrefix(data, []byte("MZ")) {
+		br, err := getReader()
+		if err != nil {
+			return nil, err
+		}
 		e, err := pe.NewFile(br)
 		if err != nil {
 			return nil, err
@@ -56,6 +71,10 @@ func openExe(r io.Reader) (exe, error) {
 		return &peExe{e}, nil
 	}
 	if bytes.HasPrefix(data, []byte("\xFE\xED\xFA")) || bytes.HasPrefix(data[1:], []byte("\xFA\xED\xFE")) {
+		br, err := getReader()
+		if err != nil {
+			return nil, err
+		}
 		e, err := macho.NewFile(br)
 		if err != nil {
 			return nil, err
